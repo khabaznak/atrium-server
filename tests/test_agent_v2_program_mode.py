@@ -66,6 +66,30 @@ def test_plan_node_rejects_program_mode_when_docker_runner_is_unavailable(monkey
     task = TaskState(goal="Compare", acceptance_criteria_md="1.- [ ] Compared")
     plan_node(task, context=CoreLoopContext(messages=InMemoryMessageQueue(), tools=_Registry(), program_runner=_UnavailableRunner()))
     assert "planned_tool_call" not in task.metadata
+    assert "Program mode is unavailable" in task.metadata["tool_call_plan_prompt"]
+
+
+def test_planner_receives_program_availability_and_tool_parallel_eligibility(monkeypatch) -> None:
+    import importlib
+
+    module = importlib.import_module("alphonse.agent_v2.core.intelligence.pdca.nodes.plan_node")
+    captured = {}
+
+    def plan(prompt):
+        captured["prompt"] = prompt
+        return _program_value()
+
+    monkeypatch.setattr(module, "_call_tool_planning_llm", plan)
+    task = TaskState(goal="Compare", acceptance_criteria_md="1.- [ ] Compared")
+    plan_node(task, context=CoreLoopContext(messages=InMemoryMessageQueue(), tools=_Registry(), program_runner=_Runner("success")))
+
+    prompt = captured["prompt"]
+    assert "Program mode is available" in prompt
+    read_line = next(line for line in prompt.splitlines() if line.startswith("- native.read |"))
+    write_line = next(line for line in prompt.splitlines() if line.startswith("- native.write |"))
+    assert "read_only=true" in read_line
+    assert "read_only=false" in write_line
+    assert "tools.gather` only for independent tools explicitly marked `read_only=true" in prompt
 
 
 def test_docker_runner_reports_unavailability_without_local_fallback(monkeypatch) -> None:

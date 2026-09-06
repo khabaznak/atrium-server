@@ -27,7 +27,7 @@ def test_plan_node_renders_tool_call_prompt_with_available_tools() -> None:
     plan_node(task, context=CoreLoopContext(messages=InMemoryMessageQueue(), tools=_ToolRegistry(), activity_sink=events.append))
 
     prompt = task.metadata["tool_call_plan_prompt"]
-    assert "exactly one next tool call" in prompt
+    assert "one bounded execution phase" in prompt
     assert "write_file" in prompt
     assert "tool-1" in prompt
     assert "1.- [ ] File exists" in prompt
@@ -46,7 +46,7 @@ def test_plan_node_stubbed_llm_leaves_plan_json_unchanged_and_executes_no_tools(
     assert task.plan_json == existing_plan
     assert tools.executed is False
     assert "planned_tool_call" not in task.metadata
-    assert "Plan prepared one-tool-call prompt" in task.updates_md
+    assert "Plan produced no executable phase" in task.updates_md
 
 
 def test_plan_node_records_valid_tool_call_when_llm_returns_result(monkeypatch) -> None:

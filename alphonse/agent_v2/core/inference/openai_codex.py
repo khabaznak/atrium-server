@@ -124,7 +124,8 @@ def _tool_planning_envelope(request: InferenceRequest) -> str:
     return _render_envelope(
         request,
         instructions=(
-            "Return one valid JSON object only. Select exactly one next execution strategy from the available tools. "
+            "Return one valid JSON object describing one bounded execution phase. "
+            "Use one direct tool call or, when the prompt says program mode is available, a multi-tool program. "
             "For direct mode, the object must contain execution_mode='direct', tool_id, tool_name, arguments, and internal_state. "
             "For program mode, the object must contain execution_mode='program', a program object with language='python' and source, and internal_state."
         ),
@@ -163,6 +164,7 @@ def _tool_descriptor_to_dict(tool: ToolDescriptor) -> dict[str, Any]:
         "argument_schema": dict(tool.argument_schema),
         "capabilities": list(tool.capabilities),
         "tags": list(tool.tags),
+        "read_only": tool.read_only,
     }
 
 

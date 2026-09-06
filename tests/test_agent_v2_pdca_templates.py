@@ -71,7 +71,7 @@ def test_tool_call_plan_prompt_template_renders_expected_sections() -> None:
     )
 
     assert "# System Prompt" in rendered
-    assert "exactly one next tool call" in rendered
+    assert "one bounded execution phase" in rendered
     assert "advance one or more acceptance criteria" in rendered
     assert "pending_silent_bash_confirmation" in rendered
     assert "next tool call must be `native.respond`" in rendered

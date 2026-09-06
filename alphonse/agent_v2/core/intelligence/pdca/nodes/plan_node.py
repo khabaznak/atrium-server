@@ -25,7 +25,7 @@ _TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates"
 
 
 def plan_node(task: TaskState, context: CoreLoopContext | None = None) -> TaskState:
-    """Prepare one future tool call without executing it."""
+    """Prepare one bounded execution phase without executing it."""
     if context is not None:
         context.emit_activity(
             phase=ImprovementPhase.PLAN,
@@ -34,6 +34,7 @@ def plan_node(task: TaskState, context: CoreLoopContext | None = None) -> TaskSt
             progress={"acceptance_criteria": "" if task.acceptance_criteria_md == "- (none)" else task.acceptance_criteria_md},
         )
     tools = _tools_from_context(context)
+    program_available = _program_mode_available(context)
     prompt = _render_tool_call_plan_prompt(
         task,
         tools,
@@ -43,17 +44,18 @@ def plan_node(task: TaskState, context: CoreLoopContext | None = None) -> TaskSt
         global_context_md=_agent_prompt_md(context, "GlobalContext.md"),
         current_time_utc=datetime.now(timezone.utc).isoformat(),
         user_timezone=_user_timezone(task, context),
+        program_available=program_available,
     )
     task.metadata["tool_call_plan_prompt"] = prompt
 
     planned_tool_call = _normalize_tool_call(
         _call_tool_planning_inference(prompt, task, tools, context),
         tools,
-        program_available=_program_mode_available(context),
+        program_available=program_available,
     )
     if planned_tool_call is None:
         task.metadata["tool_call_planning_llm_stubbed"] = True
-        task.append_update("Plan prepared one-tool-call prompt; LLM execution is stubbed.")
+        task.append_update("Plan produced no executable phase; inference may be stubbed or the plan invalid.")
         return task
 
     task.metadata["tool_call_planning_llm_stubbed"] = False
@@ -67,7 +69,7 @@ def plan_node(task: TaskState, context: CoreLoopContext | None = None) -> TaskSt
             label="thinking",
             message=str(planned_tool_call.get("internal_state") or "").strip(),
         )
-    task.append_update("Plan selected the next tool call.")
+    task.append_update("Plan selected the next bounded execution phase.")
     return task
 
 
@@ -81,6 +83,7 @@ def _render_tool_call_plan_prompt(
     global_context_md: str = "",
     current_time_utc: str = "",
     user_timezone: str = "UTC",
+    program_available: bool = False,
 ) -> str:
     env = Environment(
         loader=FileSystemLoader(_TEMPLATE_DIR),
@@ -98,6 +101,7 @@ def _render_tool_call_plan_prompt(
         global_context_md=global_context_md,
         current_time_utc=current_time_utc,
         user_timezone=user_timezone,
+        program_available=program_available,
         task_state_md=task.to_markdown_prompt(),
     ).strip()
 
@@ -106,7 +110,7 @@ def _render_tools_md(tools: tuple[ToolDescriptor, ...]) -> str:
     if not tools:
         return "- (none)"
     return "\n".join(
-        f"- {tool.tool_id} | {tool.name} | {tool.kind.value} | {tool.description or '(no description)'} | schema={tool.argument_schema}"
+        f"- {tool.tool_id} | {tool.name} | {tool.kind.value} | {tool.description or '(no description)'} | read_only={str(tool.read_only).lower()} | schema={tool.argument_schema}"
         for tool in tools
     )
 

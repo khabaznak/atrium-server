@@ -102,6 +102,7 @@ def test_plan_node_uses_codex_provider_with_exposed_tools(monkeypatch) -> None:
     envelope = json.loads(captured["input"])
     assert envelope["purpose"] == "tool_planning"
     assert envelope["tools"][0]["tool_id"] == "tool-1"
+    assert envelope["tools"][0]["read_only"] is False
 
 
 def _router() -> InferenceRouter:
