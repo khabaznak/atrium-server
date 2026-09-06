@@ -1,4 +1,4 @@
-"""Optional local media backend adapters. They are deliberately not CAPD-registered yet."""
+"""Local media adapters, including the task-scoped Ollama image/OCR tool."""
 
 from __future__ import annotations
 
@@ -53,7 +53,9 @@ def build_analyze_image_tool_definition(settings: OcrSettings, asset_store: Any 
         ANALYZE_IMAGE_TOOL_ID,
         "analyze_image",
         ToolKind.NATIVE,
-        "Analyze a task-attached image with the configured local Qwen/VL backend.",
+        f"Read a task-attached image using configured Ollama model {settings.model_id}. "
+        "For DeepSeek-OCR this extracts text, including receipt items and prices; use that text to answer the question. "
+        "This is the local OCR tool; no shell OCR installation is needed.",
         {
             "type": "object",
             "additionalProperties": False,
@@ -167,7 +169,9 @@ def analyze_task_image(arguments: dict[str, Any], *, context: ToolExecutionConte
         raise ValueError("image_analysis_unavailable")
     asset_id = str(arguments.get("asset_id") or "").strip()
     question = str(arguments.get("question") or "").strip()
-    task_asset_ids = context.task.metadata.get("asset_ids") if isinstance(context.task.metadata, dict) else []
+    metadata = context.task.metadata if isinstance(context.task.metadata, dict) else {}
+    task_asset_ids = list(metadata.get("asset_ids") or [])
+    task_asset_ids.extend(item.get("asset_id") for item in metadata.get("attachments") or [] if isinstance(item, dict))
     if not asset_id or not isinstance(task_asset_ids, list) or asset_id not in {str(item) for item in task_asset_ids}:
         raise ValueError("task_attachment_not_found")
     asset = asset_store.get(asset_id, requester_user_id=str(context.task.user or ""))
@@ -175,7 +179,15 @@ def analyze_task_image(arguments: dict[str, Any], *, context: ToolExecutionConte
         raise ValueError("task_image_not_found_or_forbidden")
     if not question:
         raise ValueError("image_analysis_question_required")
-    return analyze_image(settings, asset_path=str(asset.path), question=question, empty_code="image_analysis_empty")
+    if settings.model_id.strip().lower().startswith("deepseek-ocr"):
+        # The dedicated OCR model expects its extraction prompt, not a general
+        # visual question. CAPD interprets the extracted text afterwards.
+        result = extract_ocr(settings, asset_path=str(asset.path))
+    else:
+        result = analyze_image(settings, asset_path=str(asset.path), question=question, empty_code="image_analysis_empty")
+    if result.get("output"):
+        result["output"]["asset_id"] = asset_id
+    return result
 
 
 def analyze_image(settings: OcrSettings, *, asset_path: str, question: str, empty_code: str = "image_analysis_empty") -> dict[str, Any]:
@@ -196,7 +208,13 @@ def analyze_image(settings: OcrSettings, *, asset_path: str, question: str, empt
             timeout=settings.timeout_seconds,
         )
         latency_ms = round((time.monotonic() - started_at) * 1000)
+    except requests.Timeout:
+        return _failed("image_analysis_timeout", "Ollama OCR timed out; this does not mean OCR is disabled.", details={"model": settings.model_id, "timeout_seconds": settings.timeout_seconds})
+    except requests.ConnectionError:
+        return _failed("image_analysis_connection_failed", "The configured Ollama server could not be reached.", details={"model": settings.model_id})
     except requests.RequestException as exc: return _failed("image_analysis_http_error", "Ollama image analysis failed.", details={"error": str(exc)})
+    except OSError:
+        return _failed("image_sample_unreadable", "The stored image could not be read.")
     if response.status_code >= 400: return _failed("image_analysis_http_error", f"Ollama returned status {response.status_code}.")
     try: body = response.json()
     except ValueError: return _failed("image_analysis_invalid_json", "Ollama did not return JSON.")

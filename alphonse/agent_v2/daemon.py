@@ -58,6 +58,7 @@ from alphonse.agent_v2.services.scheduled_worker import ScheduledTaskWorker
 from alphonse.agent_v2.services.killswitch import KillSwitchAuditStore
 from alphonse.agent_v2.services.killswitch import KillSwitchCoordinator
 from alphonse.agent_v2.users import V2UserStore
+from alphonse.agent_v2.assets import AttachmentDescriptor
 from alphonse.agent_v2.web_tools_settings import WebToolsSettings
 from alphonse.agent_v2.code_mode_settings import CodeModeSettings
 from alphonse.agent_v2.code_mode_settings import SQLiteCodeModeSettingsStore
@@ -1050,14 +1051,25 @@ class V2Daemon:
             sources.append((source, stat))
 
         created: list[Path] = []
+        registered_assets: list[str] = []
         descriptors: list[dict[str, Any]] = []
         try:
             for source, stat in sources:
                 destination = self._copy_desktop_file_to_project(source, root)
                 created.append(destination)
                 mime_type = mimetypes.guess_type(destination.name)[0] or "application/octet-stream"
+                asset_id = ""
+                if mime_type.startswith("image/"):
+                    asset = self.runtime.asset_store.register_bytes(
+                        owner_user_id=actor,
+                        descriptor=AttachmentDescriptor(destination.name, mime_type, stat.st_size),
+                        content=destination.read_bytes(),
+                        source="desktop",
+                    )
+                    asset_id = asset.asset_id
+                    registered_assets.append(asset_id)
                 descriptors.append({
-                    "asset_id": "",
+                    "asset_id": asset_id,
                     "filename": destination.name,
                     "mime_type": mime_type,
                     "size_bytes": stat.st_size,
@@ -1068,6 +1080,8 @@ class V2Daemon:
                     "caption": "",
                 })
         except Exception:
+            for asset_id in registered_assets:
+                self.runtime.asset_store.delete(asset_id, requester_user_id=actor)
             for destination in created:
                 try:
                     destination.unlink()

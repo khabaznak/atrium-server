@@ -47,6 +47,16 @@ def test_from_message_carries_message_metadata() -> None:
     }
 
 
+def test_resumed_task_keeps_new_owner_attachments():
+    queue = InMemoryMessageQueue()
+    old = TaskState(user="alex", project_id="alpha", metadata={"asset_ids": ["first"]})
+    queued = CommunicationChannel(queue).queue_message(prompt="Here is the receipt", user="alex", project_id="alpha", metadata={"task_state": old.to_dict(), "attachments": [{"asset_id": "receipt"}]})
+    state = TaskState.from_queued_message(queued)
+    assert state.metadata["asset_ids"] == ["first", "receipt"]
+    state.merge_attachments({"attachments": [{"asset_id": "receipt"}]})
+    assert state.metadata["attachments"] == [{"asset_id": "receipt"}]
+
+
 def test_append_conversation_message_uses_speaker_and_quoted_prompt() -> None:
     state = TaskState()
 

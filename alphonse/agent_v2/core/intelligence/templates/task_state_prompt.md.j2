@@ -20,6 +20,7 @@
 {% set project_files = attachments | selectattr("kind", "equalto", "desktop_project_file") | list %}
 {% if project_files %}
 - Desktop project files above have been copied into the selected project directory. Inspect them with normal local tools when needed; their final filenames and project paths are listed above.
+- For image contents or OCR, use `native.analyze_image` with the listed Asset ID when available, including for desktop project images. The project path is not an Asset ID. A missing Asset ID is an attachment-registration problem, not evidence that the image is illegible or that OCR is unavailable.
 {% endif %}
 {% else %}
 - (none)

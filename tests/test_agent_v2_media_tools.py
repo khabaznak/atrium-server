@@ -145,7 +145,7 @@ def test_verified_vision_tool_analyzes_only_task_owned_image(tmp_path: Path, mon
 
     result = analyze_task_image({"asset_id": asset.asset_id, "question": "What is shown?"}, context=context, settings=settings, asset_store=asset_store)
 
-    assert result["output"]["text"] == "seen: What is shown?"
+    assert result["output"]["text"] == "seen: Free OCR."
     with pytest.raises(ValueError, match="task_attachment_not_found"):
         analyze_task_image({"asset_id": "other", "question": "What is shown?"}, context=context, settings=settings, asset_store=asset_store)
     assert build_analyze_image_tool_definition(settings, asset_store).enabled is True
@@ -210,3 +210,48 @@ def test_dedicated_deepseek_ocr_uses_its_minimal_prompt(tmp_path: Path, monkeypa
 
     assert result["output"]["text"] == "Extracted text"
     assert captured["json"]["messages"][0]["content"] == "Free OCR."
+
+
+def test_desktop_receipt_uses_ollama_with_manifest_id_and_preserves_prices(tmp_path, monkeypatch):
+    runtime, admin, settings_store = _runtime(tmp_path)
+    settings_store.update("ocr", {"enabled": True})
+    settings = settings_store.mark_verification("ocr", ready=True).ocr
+    project = runtime.project_store.create_project(name="Receipts", root_path=str(tmp_path / "project"), owner_user_id=admin.user_id)
+    source = tmp_path / "receipt.jpg"
+    source.write_bytes(b"receipt image")
+    attachments = V2Daemon(runtime).copy_desktop_project_files(user=admin.user_id, project_id=project.project_id, source_paths=[str(source)])
+    assert attachments[0]["asset_id"]
+    task = TaskState(user=admin.user_id, project_id=project.project_id, metadata={"attachments": attachments})
+    captured = {}
+
+    class Response:
+        status_code = 200
+        def json(self):
+            return {"message": {"content": "1 ORDEN PASTOR 95.00\n1 DR PEPPER 35.00"}}
+
+    def post(url, json, timeout):
+        captured.update(json)
+        return Response()
+
+    monkeypatch.setattr("alphonse.agent_v2.core.tools.registry.native.media.requests.post", post)
+    result = analyze_task_image({"asset_id": attachments[0]["asset_id"], "question": "¿Cuánto por pastor y Dr Pepper?"}, context=ToolExecutionContext(task=task, messages=InMemoryMessageQueue()), settings=settings, asset_store=runtime.asset_store)
+    assert result["exception"] is None
+    assert "95.00" in result["output"]["text"]
+    assert "35.00" in result["output"]["text"]
+    assert captured["messages"][0]["content"] == "Free OCR."
+    assert base64.b64decode(captured["messages"][0]["images"][0]) == b"receipt image"
+
+    foreign_task = TaskState(user="someone-else", metadata={"attachments": attachments})
+    with pytest.raises(ValueError, match="task_image_not_found_or_forbidden"):
+        analyze_task_image({"asset_id": attachments[0]["asset_id"], "question": "Read"}, context=ToolExecutionContext(task=foreign_task, messages=InMemoryMessageQueue()), settings=settings, asset_store=runtime.asset_store)
+
+
+def test_ocr_timeout_is_reported_separately_from_disabled_backend(tmp_path, monkeypatch):
+    import requests
+    image = tmp_path / "receipt.jpg"
+    image.write_bytes(b"jpg")
+    def timeout(*args, **kwargs):
+        raise requests.Timeout()
+    monkeypatch.setattr("alphonse.agent_v2.core.tools.registry.native.media.requests.post", timeout)
+    result = analyze_image(SQLiteMediaToolsSettingsStore(":memory:").get().ocr, asset_path=str(image), question="Read")
+    assert result["exception"]["code"] == "image_analysis_timeout"

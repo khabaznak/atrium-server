@@ -218,6 +218,18 @@ def test_check_node_keeps_new_verdict_after_consuming_steering() -> None:
     assert queue.size() == 0
 
 
+def test_steering_image_is_preserved_for_ocr_and_checkpoint_resume():
+    queue = InMemoryMessageQueue()
+    attachment = {"asset_id": "receipt-1", "filename": "receipt.jpg", "mime_type": "image/jpeg"}
+    CommunicationChannel(queue).queue_message(prompt="Aquí está la cuenta", user="alex", project_id="alpha", metadata={"routing_disposition": "steering", "attachments": [attachment], "asset_ids": ["receipt-1"]})
+    task = TaskState(goal="Split the receipt", user="alex", project_id="alpha")
+    check_node(task, context=CoreLoopContext(messages=queue))
+    restored = TaskState.from_dict(task.to_checkpoint_dict())
+    assert restored.metadata["asset_ids"] == ["receipt-1"]
+    assert restored.metadata["attachments"] == [attachment]
+    assert "Asset ID: receipt-1" in restored.to_markdown_prompt()
+
+
 def test_check_node_does_not_convert_consumed_messages_into_task_states(monkeypatch) -> None:
     queue = InMemoryMessageQueue()
     channel = CommunicationChannel(queue)

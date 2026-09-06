@@ -209,6 +209,8 @@ def _consume_matching(task: TaskState, context: CoreLoopContext, selector: Messa
         if queued is None:
             return consumed
         task.append_conversation_message(queued.message.user, queued.message.prompt)
+        if queued.message.user == task.user:
+            task.merge_attachments(queued.message.metadata)
         consumed += 1
 
 

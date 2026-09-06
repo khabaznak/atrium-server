@@ -77,6 +77,8 @@ class TaskState:
             restored.message_id = queued.message_id
             if queued.message.prompt:
                 restored.append_conversation_message(queued.message.user, queued.message.prompt)
+            if queued.message.user == restored.user:
+                restored.merge_attachments(queued.message.metadata)
             return restored
         return cls.from_message(queued.message, message_id=queued.message_id)
 
@@ -159,6 +161,19 @@ class TaskState:
         )
         template = env.get_template("task_state_prompt.md.j2")
         return template.render(task=self).strip()
+
+    def merge_attachments(self, metadata: dict[str, Any]) -> None:
+        """Preserve attachment references when same-owner steering or answers arrive."""
+        attachments = list(self.metadata.get("attachments") or [])
+        for item in metadata.get("attachments") or []:
+            if isinstance(item, dict) and item not in attachments:
+                attachments.append(dict(item))
+        ids = list(self.metadata.get("asset_ids") or [])
+        for asset_id in list(metadata.get("asset_ids") or []) + [item.get("asset_id") for item in attachments if isinstance(item, dict)]:
+            if asset_id and asset_id not in ids:
+                ids.append(asset_id)
+        self.metadata["attachments"] = attachments
+        self.metadata["asset_ids"] = ids
 
     def append_fact(self, fact: str) -> None:
         self.facts_md = _append_markdown_line(self.facts_md, fact)
